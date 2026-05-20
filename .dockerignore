@@ -1,0 +1,9 @@
+data
+node_modules
+.git
+.gitignore
+Dockerfile
+*.log
+README_DEPLOY.md
+.env
+.env.*

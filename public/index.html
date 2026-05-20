@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Chat</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="auth-screen" id="authScreen">
+      <form class="auth-card" id="authForm">
+        <div class="auth-brand">
+          <img class="app-icon" src="/icon.svg" alt="Codex Chat" />
+          <div>
+            <h1>Codex Chat</h1>
+            <p>登录后继续聊天</p>
+          </div>
+        </div>
+
+        <div class="segmented auth-tabs" role="tablist" aria-label="账号操作">
+          <button class="active" type="button" data-auth-mode="login">登录</button>
+          <button type="button" data-auth-mode="register">注册</button>
+        </div>
+
+        <label class="field">
+          <span id="authUsernameLabel">邮箱或用户名</span>
+          <input id="authUsername" name="username" autocomplete="username" required />
+        </label>
+
+        <label class="field register-only">
+          <span>邮箱</span>
+          <input id="authEmail" name="email" type="email" autocomplete="email" />
+        </label>
+
+        <label class="field register-only">
+          <span>昵称</span>
+          <input id="authDisplayName" name="displayName" autocomplete="nickname" />
+        </label>
+
+        <label class="field">
+          <span>密码</span>
+          <input id="authPassword" name="password" type="password" autocomplete="current-password" required />
+        </label>
+
+        <button class="primary-button" id="authSubmit" type="submit">登录</button>
+        <p class="auth-note" id="authNote">演示账号：iwen / 123456</p>
+        <p class="form-message" id="authMessage" role="status"></p>
+      </form>
+    </section>
+
+    <main class="shell" id="appShell" aria-label="聊天应用" hidden>
+      <aside class="sidebar" aria-label="侧边栏">
+        <section class="profile-bar">
+          <div class="avatar avatar-user" id="currentUserAvatar">IW</div>
+          <div>
+            <h1><img class="title-icon" src="/icon.svg" alt="" aria-hidden="true" />Codex Chat</h1>
+            <p id="currentUserName">正在连接</p>
+          </div>
+          <button class="icon-button" id="logoutButton" type="button" title="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+          </button>
+        </section>
+
+        <label class="search-box" for="searchInput">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m21 21-4.35-4.35m1.35-5.65a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
+          </svg>
+          <input id="searchInput" type="search" placeholder="搜索会话或好友" autocomplete="off" />
+        </label>
+
+        <div class="segmented workspace-tabs" role="tablist" aria-label="工作区">
+          <button class="active" id="chatsTab" type="button" data-view="chats">会话</button>
+          <button id="friendsTab" type="button" data-view="friends">好友</button>
+        </div>
+
+        <nav class="conversation-list" id="conversationList" aria-label="最近聊天"></nav>
+
+        <section class="friends-panel" id="friendsPanel" aria-label="好友" hidden>
+          <form class="friend-form" id="friendForm">
+            <input id="friendInput" placeholder="输入用户名添加好友" autocomplete="off" />
+            <button class="primary-button compact" type="submit">添加</button>
+          </form>
+
+          <div class="request-list" id="incomingRequests"></div>
+          <div class="friend-list" id="friendList"></div>
+          <div class="request-list" id="outgoingRequests"></div>
+          <p class="form-message" id="friendMessage" role="status"></p>
+        </section>
+      </aside>
+
+      <section class="chat-panel" aria-label="聊天窗口">
+        <header class="chat-header">
+          <button class="icon-button back-button" id="backButton" type="button" title="返回会话列表" aria-label="返回会话列表">
+            <span aria-hidden="true">‹</span>
+          </button>
+          <div class="avatar" id="activeAvatar">CC</div>
+          <div class="chat-title">
+            <h2 id="activeName">选择一个会话</h2>
+            <p id="activeStatus">消息会显示在这里</p>
+          </div>
+          <div class="header-actions" aria-label="聊天操作">
+            <span class="connection-pill" id="connectionState">离线</span>
+          </div>
+        </header>
+
+        <div class="message-stream" id="messageStream" aria-live="polite"></div>
+
+        <form class="composer" id="messageForm">
+          <button class="icon-button" type="button" title="添加附件" aria-label="添加附件">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 1 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.48-8.48" />
+            </svg>
+          </button>
+          <textarea id="messageInput" rows="1" placeholder="输入消息" autocomplete="off"></textarea>
+          <button class="send-button" id="sendButton" type="submit">发送</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
