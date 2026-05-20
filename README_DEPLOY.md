@@ -69,3 +69,26 @@ http://localhost:3000
 - For larger usage, migrate the database to PostgreSQL and use Redis pub/sub for WebSocket broadcast across instances.
 - Back up `$DATA_DIR/chat.sqlite` regularly.
 - Keep `SEED_DEMO_USERS=false` in production.
+
+## Netlify Frontend Deployment
+
+Netlify can host the static frontend, but this project also needs a long-running Node.js backend for REST APIs, SQLite, and WebSocket realtime chat. Netlify by itself is not enough for the full chat system.
+
+The included `netlify.toml` fixes the common Netlify 404 by publishing the `public` directory:
+
+```toml
+[build]
+  command = "npm run build:netlify"
+  publish = "public"
+```
+
+To make the Netlify frontend talk to a backend hosted on Render/Fly/Railway, set these Netlify environment variables:
+
+```env
+API_BASE_URL=https://your-backend.example
+WS_BASE_URL=wss://your-backend.example
+```
+
+Then redeploy the Netlify site.
+
+If you only deploy this repository to Netlify without a backend, the page can load, but login, registration, friends, and realtime chat will not work.

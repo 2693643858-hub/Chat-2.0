@@ -1,4 +1,7 @@
 const tokenKey = "codex-chat-token";
+const runtimeConfig = window.CODEX_CHAT_CONFIG || {};
+const apiBaseUrl = normalizeBaseUrl(runtimeConfig.apiBaseUrl || "");
+const wsBaseUrl = normalizeBaseUrl(runtimeConfig.wsBaseUrl || "");
 
 const state = {
   token: localStorage.getItem(tokenKey),
@@ -527,8 +530,9 @@ function connectSocket() {
 
   if (!state.token || !window.WebSocket) return;
 
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${window.location.host}/ws?token=${encodeURIComponent(state.token)}`);
+  const fallbackProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const socketOrigin = wsBaseUrl || `${fallbackProtocol}://${window.location.host}`;
+  const socket = new WebSocket(`${socketOrigin}/ws?token=${encodeURIComponent(state.token)}`);
   state.socket = socket;
 
   socket.addEventListener("open", () => {
@@ -703,7 +707,7 @@ async function requestJson(path, options = {}) {
     headers.set("Authorization", `Bearer ${state.token}`);
   }
 
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};
 
@@ -715,6 +719,10 @@ async function requestJson(path, options = {}) {
   }
 
   return payload;
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || "").replace(/\/+$/, "");
 }
 
 function autosizeTextarea() {
