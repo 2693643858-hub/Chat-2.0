@@ -92,3 +92,29 @@ WS_BASE_URL=wss://your-backend.example
 Then redeploy the Netlify site.
 
 If you only deploy this repository to Netlify without a backend, the page can load, but login, registration, friends, and realtime chat will not work.
+
+### QQ Mail SMTP Example
+
+For `@qq.com` sender accounts, first enable POP3/SMTP or IMAP/SMTP in QQ Mail settings and generate an authorization code. Use that authorization code as `SMTP_PASS`; do not use your normal QQ password.
+
+```env
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_USER=2693643858@qq.com
+SMTP_PASS=your-qq-mail-authorization-code
+SMTP_FROM=Codex Chat <2693643858@qq.com>
+SMTP_SECURE=true
+SMTP_STARTTLS=false
+```
+
+If you prefer port `587`, use STARTTLS instead:
+
+```env
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=587
+SMTP_USER=2693643858@qq.com
+SMTP_PASS=your-qq-mail-authorization-code
+SMTP_FROM=Codex Chat <2693643858@qq.com>
+SMTP_SECURE=false
+SMTP_STARTTLS=true
+```

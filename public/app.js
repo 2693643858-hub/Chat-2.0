@@ -709,7 +709,7 @@ async function requestJson(path, options = {}) {
 
   const response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  const payload = parseJsonResponse(text, response, path);
 
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith("/api/auth/")) {
@@ -723,6 +723,29 @@ async function requestJson(path, options = {}) {
 
 function normalizeBaseUrl(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function parseJsonResponse(text, response, path) {
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const contentType = response.headers.get("Content-Type") || "";
+    const looksLikeHtml = contentType.includes("text/html") || text.trimStart().startsWith("<");
+
+    if (looksLikeHtml && path.startsWith("/api/") && !apiBaseUrl) {
+      throw new Error("当前 Netlify 只部署了前端，还没有连接后端 API。请先部署 Node 后端，并在 Netlify 设置 API_BASE_URL 和 WS_BASE_URL。");
+    }
+
+    if (looksLikeHtml && path.startsWith("/api/")) {
+      throw new Error("后端地址返回了网页而不是 JSON，请检查 API_BASE_URL 是否指向真正的 Node 后端。");
+    }
+
+    throw new Error("服务器返回格式不正确，请稍后再试。");
+  }
 }
 
 function autosizeTextarea() {
