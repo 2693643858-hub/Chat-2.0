@@ -1,4 +1,5 @@
 create extension if not exists pgcrypto;
+create schema if not exists private;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -54,6 +55,15 @@ create index if not exists conversation_members_user_idx
 create index if not exists messages_conversation_created_idx
   on public.messages (conversation_id, created_at);
 
+create index if not exists friendships_requester_idx
+  on public.friendships (requester_id);
+
+create index if not exists friendships_addressee_idx
+  on public.friendships (addressee_id);
+
+create index if not exists messages_sender_idx
+  on public.messages (sender_id);
+
 do $$
 begin
   alter table public.profiles
@@ -105,6 +115,7 @@ grant select, insert on public.messages to authenticated;
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = now();
@@ -216,7 +227,7 @@ begin
 end;
 $$;
 
-create or replace function public.is_conversation_member(target_conversation_id uuid)
+create or replace function private.is_conversation_member(target_conversation_id uuid)
 returns boolean
 language sql
 security definer
@@ -226,12 +237,18 @@ as $$
     select 1
     from public.conversation_members cm
     where cm.conversation_id = target_conversation_id
-      and cm.user_id = auth.uid()
+      and cm.user_id = (select auth.uid())
   );
 $$;
 
+grant usage on schema private to authenticated;
+
+revoke all on function public.touch_updated_at() from public, anon, authenticated;
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+revoke all on function public.create_direct_conversation(uuid) from public, anon, authenticated;
+revoke all on function private.is_conversation_member(uuid) from public, anon, authenticated;
 grant execute on function public.create_direct_conversation(uuid) to authenticated;
-grant execute on function public.is_conversation_member(uuid) to authenticated;
+grant execute on function private.is_conversation_member(uuid) to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.friendships enable row level security;
@@ -248,67 +265,69 @@ drop policy if exists "Users update own profile" on public.profiles;
 create policy "Users update own profile"
 on public.profiles for update
 to authenticated
-using (id = auth.uid())
-with check (id = auth.uid());
+using (id = (select auth.uid()))
+with check (id = (select auth.uid()));
 
 drop policy if exists "Friendships are visible to participants" on public.friendships;
 create policy "Friendships are visible to participants"
 on public.friendships for select
 to authenticated
-using (requester_id = auth.uid() or addressee_id = auth.uid());
+using (requester_id = (select auth.uid()) or addressee_id = (select auth.uid()));
 
 drop policy if exists "Users can request friendships" on public.friendships;
 create policy "Users can request friendships"
 on public.friendships for insert
 to authenticated
-with check (requester_id = auth.uid() and status = 'pending');
+with check (requester_id = (select auth.uid()) and status = 'pending');
 
 drop policy if exists "Users can accept incoming friendships" on public.friendships;
 create policy "Users can accept incoming friendships"
 on public.friendships for update
 to authenticated
-using (addressee_id = auth.uid())
-with check (addressee_id = auth.uid() and status = 'accepted');
+using (addressee_id = (select auth.uid()))
+with check (addressee_id = (select auth.uid()) and status = 'accepted');
 
 drop policy if exists "Users can delete their friendships" on public.friendships;
 create policy "Users can delete their friendships"
 on public.friendships for delete
 to authenticated
-using (requester_id = auth.uid() or addressee_id = auth.uid());
+using (requester_id = (select auth.uid()) or addressee_id = (select auth.uid()));
 
 drop policy if exists "Conversation members can read conversations" on public.conversations;
 create policy "Conversation members can read conversations"
 on public.conversations for select
 to authenticated
-using (public.is_conversation_member(id));
+using (private.is_conversation_member(id));
 
 drop policy if exists "Conversation members can read member rows" on public.conversation_members;
 create policy "Conversation members can read member rows"
 on public.conversation_members for select
 to authenticated
-using (public.is_conversation_member(conversation_id));
+using (private.is_conversation_member(conversation_id));
 
 drop policy if exists "Users can update own read state" on public.conversation_members;
 create policy "Users can update own read state"
 on public.conversation_members for update
 to authenticated
-using (user_id = auth.uid())
-with check (user_id = auth.uid());
+using (user_id = (select auth.uid()))
+with check (user_id = (select auth.uid()));
 
 drop policy if exists "Conversation members can read messages" on public.messages;
 create policy "Conversation members can read messages"
 on public.messages for select
 to authenticated
-using (public.is_conversation_member(conversation_id));
+using (private.is_conversation_member(conversation_id));
 
 drop policy if exists "Conversation members can send messages" on public.messages;
 create policy "Conversation members can send messages"
 on public.messages for insert
 to authenticated
 with check (
-  sender_id = auth.uid()
-  and public.is_conversation_member(conversation_id)
+  sender_id = (select auth.uid())
+  and private.is_conversation_member(conversation_id)
 );
+
+drop function if exists public.is_conversation_member(uuid);
 
 do $$
 begin
