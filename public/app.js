@@ -1,11 +1,13 @@
-const tokenKey = "codex-chat-token";
 const runtimeConfig = window.CODEX_CHAT_CONFIG || {};
-const apiBaseUrl = normalizeBaseUrl(runtimeConfig.apiBaseUrl || "");
-const wsBaseUrl = normalizeBaseUrl(runtimeConfig.wsBaseUrl || "");
+const supabaseUrl = normalizeBaseUrl(runtimeConfig.supabaseUrl || "");
+const supabaseAnonKey = runtimeConfig.supabaseAnonKey || "";
+const supabaseClient = window.supabase && supabaseUrl && supabaseAnonKey
+  ? window.supabase.createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 const state = {
-  token: localStorage.getItem(tokenKey),
   currentUser: null,
+  session: null,
   conversations: [],
   friends: {
     friends: [],
@@ -17,8 +19,7 @@ const state = {
   searchTerm: "",
   view: "chats",
   authMode: "login",
-  socket: null,
-  reconnectTimer: null
+  channel: null
 };
 
 const elements = {
@@ -65,17 +66,30 @@ async function boot() {
   renderEmptyState();
   setConnectionState("offline");
 
-  if (!state.token) {
+  if (!supabaseClient) {
+    showAuth();
+    elements.authSubmit.disabled = true;
+    elements.authMessage.textContent = "Supabase 尚未配置。请在 Netlify 设置 SUPABASE_URL 和 SUPABASE_ANON_KEY 后重新部署。";
+    return;
+  }
+
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    if (event === "SIGNED_OUT") {
+      logoutLocal();
+    }
+
+    if (event === "SIGNED_IN" && session && !state.currentUser) {
+      await enterApp(session);
+    }
+  });
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error || !data.session) {
     showAuth();
     return;
   }
 
-  try {
-    const payload = await requestJson("/api/me");
-    await enterApp(payload.user);
-  } catch {
-    logoutLocal();
-  }
+  await enterApp(data.session);
 }
 
 function bindEvents() {
@@ -142,8 +156,10 @@ function setAuthMode(mode) {
 
   elements.authForm.classList.toggle("is-register", mode === "register");
   elements.authSubmit.textContent = mode === "register" ? "注册" : "登录";
-  elements.authUsernameLabel.textContent = mode === "register" ? "用户名" : "邮箱或用户名";
-  elements.authNote.textContent = mode === "register" ? "注册后需要先到邮箱中确认" : "演示账号：iwen / 123456";
+  elements.authUsernameLabel.textContent = mode === "register" ? "用户名" : "邮箱";
+  elements.authUsername.type = mode === "register" ? "text" : "email";
+  elements.authUsername.autocomplete = mode === "register" ? "username" : "email";
+  elements.authNote.textContent = mode === "register" ? "注册后请到邮箱中确认账号" : "使用邮箱和密码登录";
   elements.authPassword.autocomplete = mode === "register" ? "new-password" : "current-password";
   elements.authEmail.required = mode === "register";
   elements.authDisplayName.required = mode === "register";
@@ -151,48 +167,117 @@ function setAuthMode(mode) {
 }
 
 async function submitAuth() {
-  const username = elements.authUsername.value.trim();
-  const email = elements.authEmail.value.trim();
+  if (!supabaseClient) return;
+
+  const username = normalizeUsername(elements.authUsername.value);
+  const loginEmail = normalizeEmail(elements.authUsername.value);
+  const email = normalizeEmail(elements.authEmail.value);
   const displayName = elements.authDisplayName.value.trim();
   const password = elements.authPassword.value;
-  const endpoint = state.authMode === "register" ? "/api/auth/register" : "/api/auth/login";
 
   elements.authSubmit.disabled = true;
   elements.authMessage.textContent = "";
 
   try {
-    const payload = await requestJson(endpoint, {
-      method: "POST",
-      body: JSON.stringify({ username, email, displayName, password })
-    });
-
-    if (payload.requiresVerification) {
+    if (state.authMode === "register") {
+      await registerWithSupabase({ username, email, displayName, password });
       setAuthMode("login");
-      elements.authMessage.textContent = payload.message || `确认邮件已发送到 ${payload.email}，请先到邮箱中确认。`;
+      elements.authMessage.textContent = `确认邮件已发送到 ${email}，请先到邮箱中点击确认链接。`;
       return;
     }
 
-    state.token = payload.token;
-    localStorage.setItem(tokenKey, payload.token);
-    await enterApp(payload.user);
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email: loginEmail,
+      password
+    });
+
+    if (error) throw error;
+    await enterApp(data.session);
   } catch (error) {
-    elements.authMessage.textContent = error.message;
+    elements.authMessage.textContent = getFriendlyError(error);
   } finally {
     elements.authSubmit.disabled = false;
   }
 }
 
-async function enterApp(user) {
-  state.currentUser = user;
+async function registerWithSupabase({ username, email, displayName, password }) {
+  if (!username || username.length < 3) {
+    throw new Error("用户名至少需要 3 个字符。");
+  }
+
+  if (!isValidEmail(email)) {
+    throw new Error("请填写有效的邮箱地址。");
+  }
+
+  if (!displayName) {
+    throw new Error("请填写昵称。");
+  }
+
+  if (password.length < 6) {
+    throw new Error("密码至少需要 6 位。");
+  }
+
+  const { data: existing, error: lookupError } = await supabaseClient
+    .from("profiles")
+    .select("id")
+    .eq("username", username)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+  if (existing) {
+    throw new Error("这个用户名已经被使用。");
+  }
+
+  const { error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: window.location.origin,
+      data: {
+        username,
+        display_name: displayName,
+        avatar: createAvatar(displayName)
+      }
+    }
+  });
+
+  if (error) throw error;
+}
+
+async function enterApp(session) {
+  if (!session?.user) {
+    showAuth();
+    return;
+  }
+
+  state.session = session;
+  state.currentUser = await loadProfile(session.user.id);
+
+  if (!state.currentUser) {
+    throw new Error("没有找到用户资料，请稍后再试。");
+  }
+
   showApp();
   renderCurrentUser();
-  connectSocket();
+  await updateOwnStatus("online");
+  subscribeRealtime();
 
   await Promise.all([loadConversations(), loadFriends()]);
 
   if (!state.activeConversationId && state.conversations.length > 0) {
     await openConversation(state.conversations[0].id);
   }
+}
+
+async function loadProfile(userId) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? serializeUser(data) : null;
 }
 
 function showAuth() {
@@ -209,19 +294,14 @@ function showApp() {
 }
 
 async function logout() {
-  try {
-    await requestJson("/api/auth/logout", { method: "POST" });
-  } catch {
-    // A local logout is still useful if the token already expired.
-  }
-
+  await updateOwnStatus("offline");
+  await supabaseClient.auth.signOut();
   logoutLocal();
 }
 
 function logoutLocal() {
-  closeSocket();
-  localStorage.removeItem(tokenKey);
-  state.token = null;
+  unsubscribeRealtime();
+  state.session = null;
   state.currentUser = null;
   state.conversations = [];
   state.messages = [];
@@ -230,16 +310,110 @@ function logoutLocal() {
   renderEmptyState();
 }
 
-async function loadConversations() {
-  const payload = await requestJson("/api/conversations");
-  state.currentUser = payload.currentUser;
-  state.conversations = payload.conversations;
+async function updateOwnStatus(status) {
+  if (!state.currentUser) return;
+
+  await supabaseClient
+    .from("profiles")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", state.currentUser.id);
+
+  state.currentUser.status = status;
   renderCurrentUser();
+}
+
+async function loadConversations() {
+  const currentUserId = state.currentUser.id;
+  const { data: memberRows, error: memberError } = await supabaseClient
+    .from("conversation_members")
+    .select("conversation_id,user_id,last_read_at,last_read_message_id,pinned,conversations(id,type,created_at)")
+    .eq("user_id", currentUserId);
+
+  if (memberError) throw memberError;
+
+  const conversationIds = memberRows.map((row) => row.conversation_id);
+  if (conversationIds.length === 0) {
+    state.conversations = [];
+    renderConversations();
+    return;
+  }
+
+  const [{ data: allMembers, error: allMembersError }, { data: messages, error: messagesError }] = await Promise.all([
+    supabaseClient
+      .from("conversation_members")
+      .select("conversation_id,user_id,last_read_at,last_read_message_id,pinned,profiles(id,username,display_name,avatar,status,created_at)")
+      .in("conversation_id", conversationIds),
+    supabaseClient
+      .from("messages")
+      .select("id,conversation_id,sender_id,text,created_at")
+      .in("conversation_id", conversationIds)
+      .order("created_at", { ascending: true })
+  ]);
+
+  if (allMembersError) throw allMembersError;
+  if (messagesError) throw messagesError;
+
+  state.conversations = memberRows
+    .map((row) => buildConversationSummary(row, allMembers, messages))
+    .filter(Boolean)
+    .sort(sortConversations);
+
   renderConversations();
 }
 
+function buildConversationSummary(memberState, allMembers, allMessages) {
+  const conversation = memberState.conversations;
+  const members = allMembers.filter((row) => row.conversation_id === memberState.conversation_id);
+  const contact = members.find((row) => row.user_id !== state.currentUser.id)?.profiles || members[0]?.profiles;
+  const messages = allMessages.filter((message) => message.conversation_id === memberState.conversation_id);
+  const lastMessage = messages.at(-1) || null;
+  const lastReadAt = memberState.last_read_at || "";
+  const unread = messages.filter((message) => (
+    message.sender_id !== state.currentUser.id && message.created_at > lastReadAt
+  )).length;
+
+  return {
+    id: memberState.conversation_id,
+    type: conversation?.type || "direct",
+    contact: serializeUser(contact),
+    unread,
+    pinned: Boolean(memberState.pinned),
+    lastMessage: lastMessage ? serializeMessage(lastMessage, members) : null,
+    createdAt: conversation?.created_at
+  };
+}
+
 async function loadFriends() {
-  state.friends = await requestJson("/api/friends");
+  const currentUserId = state.currentUser.id;
+  const { data, error } = await supabaseClient
+    .from("friendships")
+    .select("id,requester_id,addressee_id,status,created_at,updated_at,requester:profiles!friendships_requester_id_fkey(id,username,display_name,avatar,status,created_at),addressee:profiles!friendships_addressee_id_fkey(id,username,display_name,avatar,status,created_at)")
+    .or(`requester_id.eq.${currentUserId},addressee_id.eq.${currentUserId}`)
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+
+  const friends = [];
+  const incoming = [];
+  const outgoing = [];
+
+  data.forEach((row) => {
+    if (row.status === "accepted") {
+      friends.push({
+        ...serializeUser(row.requester_id === currentUserId ? row.addressee : row.requester),
+        friendshipId: row.id
+      });
+      return;
+    }
+
+    if (row.addressee_id === currentUserId) {
+      incoming.push({ ...serializeUser(row.requester), friendshipId: row.id });
+    } else {
+      outgoing.push({ ...serializeUser(row.addressee), friendshipId: row.id });
+    }
+  });
+
+  state.friends = { friends, incoming, outgoing };
   renderFriends();
 }
 
@@ -389,42 +563,77 @@ function createEmptyBlock(title, detail) {
 }
 
 async function sendFriendRequest() {
-  const username = elements.friendInput.value.trim();
+  const username = normalizeUsername(elements.friendInput.value);
   if (!username) return;
 
   elements.friendMessage.textContent = "";
 
   try {
-    state.friends = await requestJson("/api/friends/request", {
-      method: "POST",
-      body: JSON.stringify({ username })
-    });
+    const { data: target, error: targetError } = await supabaseClient
+      .from("profiles")
+      .select("id,username,display_name,avatar,status,created_at")
+      .eq("username", username)
+      .maybeSingle();
+
+    if (targetError) throw targetError;
+    if (!target || target.id === state.currentUser.id) {
+      throw new Error("没有找到这个用户。");
+    }
+
+    const existing = [...state.friends.friends, ...state.friends.incoming, ...state.friends.outgoing]
+      .some((friend) => friend.id === target.id);
+
+    if (existing) {
+      throw new Error("你们已经有好友关系或待处理请求。");
+    }
+
+    const { error } = await supabaseClient
+      .from("friendships")
+      .insert({
+        requester_id: state.currentUser.id,
+        addressee_id: target.id,
+        status: "pending"
+      });
+
+    if (error) throw error;
+
     elements.friendInput.value = "";
     elements.friendMessage.textContent = "好友请求已发送。";
-    renderFriends();
+    await loadFriends();
   } catch (error) {
-    elements.friendMessage.textContent = error.message;
+    elements.friendMessage.textContent = getFriendlyError(error);
   }
 }
 
 async function acceptFriend(userId) {
   try {
-    state.friends = await requestJson(`/api/friends/${userId}/accept`, { method: "POST" });
-    await Promise.all([loadConversations(), loadFriends()]);
+    const { error } = await supabaseClient
+      .from("friendships")
+      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .eq("requester_id", userId)
+      .eq("addressee_id", state.currentUser.id);
+
+    if (error) throw error;
+
+    await Promise.all([loadFriends(), loadConversations()]);
   } catch (error) {
-    elements.friendMessage.textContent = error.message;
+    elements.friendMessage.textContent = getFriendlyError(error);
   }
 }
 
 async function openFriendConversation(friend) {
-  const payload = await requestJson("/api/conversations/direct", {
-    method: "POST",
-    body: JSON.stringify({ userId: friend.id })
+  const { data, error } = await supabaseClient.rpc("create_direct_conversation", {
+    other_user_id: friend.id
   });
 
-  upsertConversation(payload.conversation);
+  if (error) {
+    elements.friendMessage.textContent = getFriendlyError(error);
+    return;
+  }
+
   setView("chats");
-  await openConversation(payload.conversation.id);
+  await loadConversations();
+  await openConversation(data);
 }
 
 async function openConversation(conversationId) {
@@ -432,14 +641,36 @@ async function openConversation(conversationId) {
   elements.appShell.classList.add("chat-open");
   renderConversations();
 
-  const payload = await requestJson(`/api/conversations/${conversationId}/messages`);
-  upsertConversation(payload.conversation);
-  state.messages = payload.messages;
-  renderActiveHeader(payload.conversation);
+  state.messages = await listMessages(conversationId);
+  const active = state.conversations.find((conversation) => conversation.id === conversationId);
+
+  if (active) {
+    renderActiveHeader(active);
+  }
+
   renderMessages();
   renderConversations();
   await markRead(conversationId);
   elements.messageInput.focus();
+}
+
+async function listMessages(conversationId) {
+  const [{ data: messages, error: messagesError }, { data: members, error: membersError }] = await Promise.all([
+    supabaseClient
+      .from("messages")
+      .select("id,conversation_id,sender_id,text,created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true }),
+    supabaseClient
+      .from("conversation_members")
+      .select("conversation_id,user_id,last_read_at,last_read_message_id,profiles(id,username,display_name,avatar,status,created_at)")
+      .eq("conversation_id", conversationId)
+  ]);
+
+  if (messagesError) throw messagesError;
+  if (membersError) throw membersError;
+
+  return messages.map((message) => serializeMessage(message, members));
 }
 
 function renderActiveHeader(conversation) {
@@ -495,161 +726,93 @@ async function sendMessage() {
   elements.sendButton.disabled = true;
 
   try {
-    const payload = await requestJson(`/api/conversations/${state.activeConversationId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ text })
-    });
+    const { data, error } = await supabaseClient
+      .from("messages")
+      .insert({
+        conversation_id: state.activeConversationId,
+        sender_id: state.currentUser.id,
+        text
+      })
+      .select("id,conversation_id,sender_id,text,created_at")
+      .single();
 
-    appendMessage(payload.message);
-    upsertConversation(payload.conversation);
+    if (error) throw error;
+
+    const members = await getConversationMembers(state.activeConversationId);
+    appendMessage(serializeMessage(data, members));
     elements.messageInput.value = "";
     autosizeTextarea();
     renderMessages();
-    renderConversations();
+    await loadConversations();
   } catch (error) {
-    elements.friendMessage.textContent = error.message;
+    elements.friendMessage.textContent = getFriendlyError(error);
   } finally {
     updateSendState();
   }
 }
 
+async function getConversationMembers(conversationId) {
+  const { data, error } = await supabaseClient
+    .from("conversation_members")
+    .select("conversation_id,user_id,last_read_at,last_read_message_id,profiles(id,username,display_name,avatar,status,created_at)")
+    .eq("conversation_id", conversationId);
+
+  if (error) throw error;
+  return data;
+}
+
 async function markRead(conversationId) {
   if (!conversationId) return;
 
-  try {
-    const payload = await requestJson(`/api/conversations/${conversationId}/read`, { method: "POST" });
-    upsertConversation(payload.conversation);
-    renderConversations();
-  } catch {
-    // The next successful load will refresh unread counts.
+  const lastMessage = state.messages.at(-1);
+  const { error } = await supabaseClient
+    .from("conversation_members")
+    .update({
+      last_read_message_id: lastMessage?.id || null,
+      last_read_at: new Date().toISOString()
+    })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", state.currentUser.id);
+
+  if (!error) {
+    await loadConversations();
   }
 }
 
-function connectSocket() {
-  closeSocket(false);
+function subscribeRealtime() {
+  unsubscribeRealtime();
 
-  if (!state.token || !window.WebSocket) return;
-
-  const fallbackProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const socketOrigin = wsBaseUrl || `${fallbackProtocol}://${window.location.host}`;
-  const socket = new WebSocket(`${socketOrigin}/ws?token=${encodeURIComponent(state.token)}`);
-  state.socket = socket;
-
-  socket.addEventListener("open", () => {
-    setConnectionState("online");
-  });
-
-  socket.addEventListener("message", (event) => {
-    const payload = JSON.parse(event.data);
-    handleSocketPayload(payload);
-  });
-
-  socket.addEventListener("close", () => {
-    setConnectionState("offline");
-    if (state.token) {
-      state.reconnectTimer = window.setTimeout(connectSocket, 1600);
-    }
-  });
-
-  socket.addEventListener("error", () => {
-    setConnectionState("offline");
-  });
-}
-
-function closeSocket(clearTimer = true) {
-  if (clearTimer && state.reconnectTimer) {
-    window.clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = null;
-  }
-
-  if (state.socket) {
-    state.socket.close();
-    state.socket = null;
-  }
-}
-
-function handleSocketPayload(payload) {
-  if (payload.type === "socket:ready") {
-    state.currentUser = payload.user;
-    renderCurrentUser();
-    return;
-  }
-
-  if (payload.type === "message:new") {
-    upsertConversation(payload.conversation);
-
-    if (payload.conversationId === state.activeConversationId) {
-      appendMessage(payload.message);
-      renderMessages();
-
-      if (payload.message.senderId !== state.currentUser.id) {
-        markRead(payload.conversationId);
-      }
-    }
-
-    renderConversations();
-    return;
-  }
-
-  if (payload.type === "conversation:read") {
-    applyReadReceipt(payload);
-    return;
-  }
-
-  if (payload.type === "friend:request" || payload.type === "friend:accepted") {
-    loadFriends();
-    loadConversations();
-    return;
-  }
-
-  if (payload.type === "presence:update") {
-    applyPresence(payload.user);
-  }
-}
-
-function applyReadReceipt(payload) {
-  if (payload.user.id === state.currentUser.id && payload.conversation) {
-    upsertConversation(payload.conversation);
-    renderConversations();
-  }
-
-  if (payload.conversationId !== state.activeConversationId || payload.user.id === state.currentUser.id) {
-    return;
-  }
-
-  state.messages = state.messages.map((message) => {
-    if (message.senderId !== state.currentUser.id || new Date(message.createdAt) > new Date(payload.readAt)) {
-      return message;
-    }
-
-    const exists = message.readBy.some((user) => user.id === payload.user.id);
-    return exists ? message : { ...message, readBy: [...message.readBy, payload.user] };
-  });
-
-  renderMessages();
-}
-
-function applyPresence(user) {
-  state.conversations = state.conversations.map((conversation) => {
-    if (conversation.contact.id !== user.id) return conversation;
-    return { ...conversation, contact: { ...conversation.contact, status: user.status } };
-  });
-
-  for (const key of ["friends", "incoming", "outgoing"]) {
-    state.friends[key] = state.friends[key].map((friend) => {
-      if (friend.id !== user.id) return friend;
-      return { ...friend, status: user.status };
+  state.channel = supabaseClient
+    .channel("codex-chat-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, refreshRealtimeData)
+    .on("postgres_changes", { event: "*", schema: "public", table: "conversation_members" }, refreshRealtimeData)
+    .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, refreshRealtimeData)
+    .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, refreshRealtimeData)
+    .subscribe((status) => {
+      setConnectionState(status === "SUBSCRIBED" ? "online" : "offline");
     });
-  }
+}
 
-  const active = state.conversations.find((conversation) => conversation.id === state.activeConversationId);
-  if (active) {
-    renderActiveHeader(active);
+function unsubscribeRealtime() {
+  if (state.channel) {
+    supabaseClient.removeChannel(state.channel);
+    state.channel = null;
   }
+}
 
-  renderCurrentUser();
-  renderConversations();
-  renderFriends();
+async function refreshRealtimeData(payload) {
+  if (!state.currentUser) return;
+
+  await Promise.all([loadFriends(), loadConversations()]);
+
+  if (state.activeConversationId) {
+    state.messages = await listMessages(state.activeConversationId);
+    renderMessages();
+
+    if (payload.table === "messages" && payload.new?.sender_id !== state.currentUser.id) {
+      await markRead(state.activeConversationId);
+    }
+  }
 }
 
 function appendMessage(message) {
@@ -658,20 +821,45 @@ function appendMessage(message) {
   state.messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 }
 
-function upsertConversation(conversation) {
-  if (!conversation) return;
+function serializeMessage(message, members) {
+  const senderProfile = members.find((member) => member.user_id === message.sender_id)?.profiles;
+  const readBy = members
+    .filter((member) => (
+      member.user_id !== message.sender_id
+      && member.last_read_at
+      && member.last_read_at >= message.created_at
+    ))
+    .map((member) => serializeUser(member.profiles));
 
-  const index = state.conversations.findIndex((item) => item.id === conversation.id);
-  if (index >= 0) {
-    state.conversations[index] = conversation;
-  } else {
-    state.conversations.unshift(conversation);
+  return {
+    id: message.id,
+    conversationId: message.conversation_id,
+    senderId: message.sender_id,
+    sender: serializeUser(senderProfile),
+    text: message.text,
+    createdAt: message.created_at,
+    readBy
+  };
+}
+
+function serializeUser(profile) {
+  if (!profile) {
+    return {
+      id: "",
+      username: "unknown",
+      name: "未知用户",
+      avatar: "?"
+    };
   }
 
-  state.conversations.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return new Date(getConversationDate(b)) - new Date(getConversationDate(a));
-  });
+  return {
+    id: profile.id,
+    username: profile.username,
+    name: profile.display_name,
+    avatar: profile.avatar,
+    status: profile.status || "offline",
+    createdAt: profile.created_at
+  };
 }
 
 function getFilteredConversations() {
@@ -695,57 +883,9 @@ function matchUser(user, term) {
   return `${user.name} ${user.username}`.toLowerCase().includes(term);
 }
 
-async function requestJson(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Accept", "application/json");
-
-  if (options.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  if (state.token) {
-    headers.set("Authorization", `Bearer ${state.token}`);
-  }
-
-  const response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers });
-  const text = await response.text();
-  const payload = parseJsonResponse(text, response, path);
-
-  if (!response.ok) {
-    if (response.status === 401 && !path.startsWith("/api/auth/")) {
-      logoutLocal();
-    }
-    throw new Error(payload.error || "请求失败");
-  }
-
-  return payload;
-}
-
-function normalizeBaseUrl(value) {
-  return String(value || "").replace(/\/+$/, "");
-}
-
-function parseJsonResponse(text, response, path) {
-  if (!text) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    const contentType = response.headers.get("Content-Type") || "";
-    const looksLikeHtml = contentType.includes("text/html") || text.trimStart().startsWith("<");
-
-    if (looksLikeHtml && path.startsWith("/api/") && !apiBaseUrl) {
-      throw new Error("当前 Netlify 只部署了前端，还没有连接后端 API。请先部署 Node 后端，并在 Netlify 设置 API_BASE_URL 和 WS_BASE_URL。");
-    }
-
-    if (looksLikeHtml && path.startsWith("/api/")) {
-      throw new Error("后端地址返回了网页而不是 JSON，请检查 API_BASE_URL 是否指向真正的 Node 后端。");
-    }
-
-    throw new Error("服务器返回格式不正确，请稍后再试。");
-  }
+function sortConversations(a, b) {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  return new Date(getConversationDate(b)) - new Date(getConversationDate(a));
 }
 
 function autosizeTextarea() {
@@ -810,4 +950,42 @@ function statusLabel(status) {
   };
 
   return labels[status] || "未知";
+}
+
+function createAvatar(displayName) {
+  return Array.from(displayName).slice(0, 2).join("").toUpperCase();
+}
+
+function normalizeUsername(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getFriendlyError(error) {
+  const message = error?.message || String(error);
+
+  if (message.includes("Invalid login credentials")) {
+    return "邮箱或密码不正确。";
+  }
+
+  if (message.includes("Email not confirmed")) {
+    return "请先到邮箱中点击确认链接。";
+  }
+
+  if (message.includes("duplicate key")) {
+    return "这个用户名或邮箱已经被使用。";
+  }
+
+  return message;
 }

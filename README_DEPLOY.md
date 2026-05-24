@@ -72,7 +72,12 @@ http://localhost:3000
 
 ## Netlify Frontend Deployment
 
-Netlify can host the static frontend, but this project also needs a long-running Node.js backend for REST APIs, SQLite, and WebSocket realtime chat. Netlify by itself is not enough for the full chat system.
+Netlify can host the static frontend. The recommended public setup is now:
+
+- Netlify: static frontend
+- Supabase Auth: email registration and confirmation
+- Supabase Postgres: profiles, friends, conversations, messages
+- Supabase Realtime: live message updates
 
 The included `netlify.toml` fixes the common Netlify 404 by publishing the `public` directory:
 
@@ -82,16 +87,38 @@ The included `netlify.toml` fixes the common Netlify 404 by publishing the `publ
   publish = "public"
 ```
 
-To make the Netlify frontend talk to a backend hosted on Render/Fly/Railway, set these Netlify environment variables:
+## Supabase Backend Setup
+
+1. Create a Supabase project.
+2. Open **SQL Editor**.
+3. Copy and run [supabase/schema.sql](./supabase/schema.sql).
+4. Open **Authentication > URL Configuration**.
+5. Set **Site URL** to your Netlify URL, for example:
+
+```text
+https://chat-tex.netlify.app
+```
+
+6. Add the same URL to **Redirect URLs**.
+7. Open **Project Settings > API** and copy:
+   - Project URL
+   - anon public key
+8. In Netlify, set these environment variables:
 
 ```env
-API_BASE_URL=https://your-backend.example
-WS_BASE_URL=wss://your-backend.example
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
 Then redeploy the Netlify site.
 
-If you only deploy this repository to Netlify without a backend, the page can load, but login, registration, friends, and realtime chat will not work.
+After this, registration sends Supabase's email confirmation message automatically. You no longer need the old Node SMTP backend for the Netlify + Supabase version.
+
+If the page says Supabase is not configured, check that the Netlify environment variables above are set for the production context and redeploy.
+
+## Legacy Node Backend Email
+
+The Docker/Node backend still supports SMTP if you deploy it separately. This is not required for the Netlify + Supabase setup above because Supabase Auth sends confirmation emails.
 
 ### QQ Mail SMTP Example
 

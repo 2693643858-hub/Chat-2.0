@@ -1,4 +1,6 @@
 window.CODEX_CHAT_CONFIG = {
   "apiBaseUrl": "",
-  "wsBaseUrl": ""
+  "wsBaseUrl": "",
+  "supabaseUrl": "",
+  "supabaseAnonKey": ""
 };
