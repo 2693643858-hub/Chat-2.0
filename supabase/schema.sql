@@ -2,9 +2,9 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  username text not null unique check (char_length(username) >= 3),
-  display_name text not null,
-  avatar text not null,
+  username text not null unique check (username ~ '^[a-z0-9_]{3,24}$'),
+  display_name text not null check (char_length(trim(display_name)) between 1 and 32),
+  avatar text not null check (char_length(trim(avatar)) between 1 and 8),
   status text not null default 'offline',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -44,7 +44,7 @@ create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade,
-  text text not null check (char_length(trim(text)) > 0),
+  text text not null check (char_length(trim(text)) between 1 and 2000),
   created_at timestamptz not null default now()
 );
 
@@ -54,12 +54,52 @@ create index if not exists conversation_members_user_idx
 create index if not exists messages_conversation_created_idx
   on public.messages (conversation_id, created_at);
 
+do $$
+begin
+  alter table public.profiles
+    add constraint profiles_username_format check (username ~ '^[a-z0-9_]{3,24}$');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.profiles
+    add constraint profiles_display_name_length check (char_length(trim(display_name)) between 1 and 32);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.profiles
+    add constraint profiles_avatar_length check (char_length(trim(avatar)) between 1 and 8);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.messages
+    add constraint messages_text_length check (char_length(trim(text)) between 1 and 2000);
+exception
+  when duplicate_object then null;
+end $$;
+
+revoke all on public.profiles from anon, authenticated;
+revoke all on public.friendships from anon, authenticated;
+revoke all on public.conversations from anon, authenticated;
+revoke all on public.conversation_members from anon, authenticated;
+revoke all on public.messages from anon, authenticated;
+
 grant usage on schema public to anon, authenticated;
 grant select on public.profiles to anon, authenticated;
-grant update on public.profiles to authenticated;
-grant select, insert, update, delete on public.friendships to authenticated;
+grant update (display_name, avatar, status, updated_at) on public.profiles to authenticated;
+grant select, insert, delete on public.friendships to authenticated;
+grant update (status, updated_at) on public.friendships to authenticated;
 grant select on public.conversations to authenticated;
-grant select, update on public.conversation_members to authenticated;
+grant select on public.conversation_members to authenticated;
+grant update (last_read_message_id, last_read_at, pinned) on public.conversation_members to authenticated;
 grant select, insert on public.messages to authenticated;
 
 create or replace function public.touch_updated_at()
@@ -89,18 +129,28 @@ security definer
 set search_path = public
 as $$
 declare
+  requested_username text;
   fallback_username text;
   fallback_display_name text;
 begin
+  requested_username := lower(regexp_replace(coalesce(new.raw_user_meta_data->>'username', ''), '[^a-z0-9_]+', '', 'g'));
   fallback_username := lower(regexp_replace(split_part(new.email, '@', 1), '[^a-z0-9_]+', '', 'g'));
-  fallback_display_name := coalesce(new.raw_user_meta_data->>'display_name', fallback_username, 'New User');
+  fallback_display_name := left(coalesce(nullif(trim(new.raw_user_meta_data->>'display_name'), ''), fallback_username, 'New User'), 32);
+
+  if fallback_username !~ '^[a-z0-9_]{3,24}$' then
+    fallback_username := 'user_' || substr(replace(new.id::text, '-', ''), 1, 8);
+  end if;
+
+  if requested_username !~ '^[a-z0-9_]{3,24}$' then
+    requested_username := fallback_username;
+  end if;
 
   insert into public.profiles (id, username, display_name, avatar)
   values (
     new.id,
-    coalesce(nullif(new.raw_user_meta_data->>'username', ''), fallback_username),
+    requested_username,
     fallback_display_name,
-    coalesce(nullif(new.raw_user_meta_data->>'avatar', ''), upper(left(fallback_display_name, 2)))
+    left(coalesce(nullif(trim(new.raw_user_meta_data->>'avatar'), ''), upper(left(fallback_display_name, 2))), 8)
   );
 
   return new;

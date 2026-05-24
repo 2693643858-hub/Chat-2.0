@@ -19,6 +19,7 @@ const state = {
   searchTerm: "",
   view: "chats",
   authMode: "login",
+  backendConfigured: Boolean(supabaseClient),
   channel: null
 };
 
@@ -68,8 +69,7 @@ async function boot() {
 
   if (!supabaseClient) {
     showAuth();
-    elements.authSubmit.disabled = true;
-    elements.authMessage.textContent = "Supabase 尚未配置。请在 Netlify 设置 SUPABASE_URL 和 SUPABASE_ANON_KEY 后重新部署。";
+    showBackendUnavailable();
     return;
   }
 
@@ -164,6 +164,17 @@ function setAuthMode(mode) {
   elements.authEmail.required = mode === "register";
   elements.authDisplayName.required = mode === "register";
   elements.authMessage.textContent = "";
+
+  if (!state.backendConfigured) {
+    showBackendUnavailable();
+  }
+}
+
+function showBackendUnavailable() {
+  elements.authForm.classList.add("is-unconfigured");
+  elements.authSubmit.disabled = true;
+  elements.authNote.textContent = "后端服务还没有连接，配置完成后即可开放登录和注册。";
+  elements.authMessage.textContent = "站点管理员需要在 Netlify 添加 SUPABASE_URL 和 SUPABASE_ANON_KEY，然后重新部署。";
 }
 
 async function submitAuth() {

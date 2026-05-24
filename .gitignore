@@ -2,6 +2,7 @@ data/*.sqlite
 data/*.sqlite-*
 data/outbox/
 node_modules/
+.netlify/
 .env
 .env.*
 !.env.example
