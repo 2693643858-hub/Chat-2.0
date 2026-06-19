@@ -116,6 +116,18 @@ After this, registration sends Supabase's email confirmation message automatical
 
 If the page says Supabase is not configured, check that the Netlify environment variables above are set for the production context and redeploy.
 
+## Phase 2 Social Chat Upgrade
+
+If the original Supabase schema is already running, upgrade it by opening **Supabase > SQL Editor** and running:
+
+```text
+supabase/migrations/20260619_phase2_social_chat.sql
+```
+
+This adds group chats, richer profiles, pinned/muted conversations, message recall, per-user message favorites/deletes, typing indicators, and private attachment storage.
+
+After the migration succeeds, push the frontend changes and redeploy Netlify. Do not deploy the Phase 2 frontend before the migration, because it reads the new database columns.
+
 ## Legacy Node Backend Email
 
 The Docker/Node backend still supports SMTP if you deploy it separately. This is not required for the Netlify + Supabase setup above because Supabase Auth sends confirmation emails.

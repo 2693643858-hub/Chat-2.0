@@ -148,7 +148,8 @@ body::after {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -158,7 +159,8 @@ button {
 
 button,
 input,
-textarea {
+textarea,
+select {
   color: inherit;
 }
 
@@ -321,7 +323,9 @@ textarea {
 }
 
 .field input,
+.field select,
 .friend-form input,
+.group-form input,
 .search-box,
 .composer textarea {
   color: var(--text);
@@ -331,7 +335,9 @@ textarea {
 }
 
 .field input,
-.friend-form input {
+.field select,
+.friend-form input,
+.group-form input {
   width: 100%;
   min-width: 0;
   height: 42px;
@@ -346,7 +352,9 @@ textarea::placeholder {
 }
 
 .field input:focus,
+.field select:focus,
 .friend-form input:focus,
+.group-form input:focus,
 .search-box:focus-within,
 .composer textarea:focus {
   border-color: var(--line-strong);
@@ -499,6 +507,19 @@ textarea::placeholder {
   background: linear-gradient(145deg, #f6f8ff, #61f6c6 52%, #6bb8ff);
 }
 
+.avatar-button {
+  padding: 0;
+  border-color: rgba(219, 255, 246, 0.4);
+}
+
+.avatar-button:hover,
+.avatar-button:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(97, 246, 198, 0.14),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+  outline: none;
+}
+
 .icon-button {
   display: inline-grid;
   width: 36px;
@@ -595,6 +616,18 @@ textarea::placeholder {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.conversation-item.muted .conversation-meta span::before {
+  content: "免打扰 · ";
+  color: var(--warning);
+}
+
+.conversation-item.pinned .conversation-top strong::after {
+  content: " 置顶";
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .conversation-main {
   min-width: 0;
 }
@@ -673,6 +706,10 @@ textarea::placeholder {
   background: var(--warning);
 }
 
+.status-dot.dnd {
+  background: var(--alert);
+}
+
 .status-dot.offline {
   background: #52615d;
 }
@@ -688,6 +725,20 @@ textarea::placeholder {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   margin-bottom: 14px;
+}
+
+.group-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.group-form .section-title {
+  margin: 0 0 2px;
 }
 
 .section-title {
@@ -777,6 +828,12 @@ textarea::placeholder {
   gap: 4px;
 }
 
+.icon-button.active {
+  color: var(--accent-strong);
+  background: rgba(97, 246, 198, 0.12);
+  border-color: rgba(97, 246, 198, 0.28);
+}
+
 .connection-pill {
   display: inline-grid;
   min-width: 74px;
@@ -805,6 +862,13 @@ textarea::placeholder {
   gap: 10px;
   overflow-y: auto;
   padding: 20px;
+}
+
+.typing-indicator {
+  min-height: 28px;
+  padding: 0 20px 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .empty-state {
@@ -842,6 +906,7 @@ textarea::placeholder {
 }
 
 .message-bubble {
+  position: relative;
   max-width: min(560px, 72%);
   padding: 10px 12px 8px;
   color: var(--text);
@@ -851,6 +916,12 @@ textarea::placeholder {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
 }
 
+.message-bubble.recalled {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  border-style: dashed;
+}
+
 .message-row.me .message-bubble {
   color: #04100d;
   background: linear-gradient(180deg, #86ffd8, #43d8ac);
@@ -858,11 +929,90 @@ textarea::placeholder {
   box-shadow: 0 12px 34px rgba(97, 246, 198, 0.12);
 }
 
+.message-row.me .message-bubble.recalled {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 .message-bubble p {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 15px;
   line-height: 1.48;
+}
+
+.message-attachment {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-attachment img {
+  display: block;
+  max-width: min(360px, 100%);
+  max-height: 300px;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+}
+
+.file-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: min(280px, 100%);
+  padding: 10px;
+  color: inherit;
+  text-decoration: none;
+  background: rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.file-card strong,
+.file-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.message-bubble:hover .message-actions,
+.message-bubble:focus-within .message-actions {
+  opacity: 1;
+}
+
+.message-actions button {
+  min-height: 24px;
+  padding: 0 7px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.message-row.me .message-actions button {
+  background: rgba(4, 16, 13, 0.1);
+  border-color: rgba(4, 16, 13, 0.12);
 }
 
 .message-bubble time {
@@ -889,6 +1039,15 @@ textarea::placeholder {
   backdrop-filter: blur(18px);
 }
 
+.attachment-chip {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer textarea {
   width: 100%;
   max-height: 132px;
@@ -904,6 +1063,62 @@ textarea::placeholder {
   min-width: 72px;
   height: 42px;
   padding: 0 18px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(14px);
+}
+
+.modal-panel {
+  display: grid;
+  width: min(560px, 100%);
+  gap: 16px;
+  padding: 20px;
+  background:
+    linear-gradient(180deg, rgba(16, 24, 28, 0.98), rgba(7, 11, 14, 0.98)),
+    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-header h2,
+.modal-header p {
+  margin: 0;
+}
+
+.modal-header h2 {
+  font-size: 20px;
+}
+
+.modal-header p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 760px) {
@@ -955,6 +1170,14 @@ textarea::placeholder {
 
   .composer {
     padding: 12px;
+  }
+
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .span-2 {
+    grid-column: auto;
   }
 }
 
